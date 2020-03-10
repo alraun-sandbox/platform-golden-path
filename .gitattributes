@@ -1,0 +1,13 @@
+* text=auto
+
+# Shell scripts run inside Linux containers. A CRLF shebang fails with
+# "bad interpreter: No such file or directory" - which we found the hard way.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+
+# Rego and SQL are read by Linux tooling; keep them LF too.
+*.rego text eol=lf
+*.sql text eol=lf
+
+*.ps1 text eol=crlf

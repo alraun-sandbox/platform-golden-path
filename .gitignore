@@ -1,0 +1,38 @@
+# Editor and OS noise.
+.vs/
+.idea/
+*.user
+.DS_Store
+Thumbs.db
+
+# Local-only package-source overrides. These name internal hosts and must never be published.
+NuGet.local.config
+**/NuGet.local.config
+# .NET build output.
+bin/
+obj/
+TestResults/
+*.coverage
+# JVM build output.
+target/
+build/
+.gradle/
+# Terraform working state. State and plans can carry resource identifiers and secrets.
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+plan.txt
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Variable files carry environment specifics and sometimes worse.
+*.auto.tfvars
+secrets.tfvars
+# ...but the policy test fixtures are deliberate committed artifacts.
+!policy/fixtures/**
