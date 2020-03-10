@@ -1,0 +1,8 @@
+# Changes here affect every team in the estate, so nothing merges without platform review.
+* @alraun-sandbox/platform-engineering
+
+# Policy and compliance rules are jointly owned: the platform team runs them,
+# the security guild decides what they should say.
+/policy/                @alraun-sandbox/platform-engineering @alraun-sandbox/security-guild
+/codeql/                @alraun-sandbox/platform-engineering @alraun-sandbox/security-guild
+/.github/workflows/security.yml  @alraun-sandbox/platform-engineering @alraun-sandbox/security-guild
