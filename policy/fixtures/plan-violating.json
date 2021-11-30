@@ -1,0 +1,112 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.8",
+  "_comment": "Every violation in this fixture is one a real team has shipped. It is the regression suite for the policy bundle and the source of the Act 4 'blocked pull request' demo.",
+  "resource_changes": [
+    {
+      "address": "azurerm_storage_account.claim_documents",
+      "type": "azurerm_storage_account",
+      "name": "claim_documents",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "stclaimdocspublic",
+          "location": "westeurope",
+          "public_network_access_enabled": true,
+          "allow_nested_items_to_be_public": true,
+          "min_tls_version": "TLS1_0",
+          "enable_https_traffic_only": false,
+          "tags": {
+            "Environment": "production",
+            "Owner": "tbd"
+          }
+        }
+      }
+    },
+    {
+      "address": "azurerm_storage_container.public_docs",
+      "type": "azurerm_storage_container",
+      "name": "public_docs",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "public-docs",
+          "container_access_type": "blob"
+        }
+      }
+    },
+    {
+      "address": "azurerm_postgresql_flexible_server.claims",
+      "type": "azurerm_postgresql_flexible_server",
+      "name": "claims",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "psql-claims-temp",
+          "location": "eastus",
+          "public_network_access_enabled": true,
+          "tags": {
+            "Environment": "dev",
+            "Owner": "claims-team",
+            "CostCenter": "4711"
+          }
+        }
+      }
+    },
+    {
+      "address": "azurerm_postgresql_flexible_server_firewall_rule.allow_all",
+      "type": "azurerm_postgresql_flexible_server_firewall_rule",
+      "name": "allow_all",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "AllowAllAzureServices",
+          "start_ip_address": "0.0.0.0",
+          "end_ip_address": "0.0.0.0"
+        }
+      }
+    },
+    {
+      "address": "azurerm_role_assignment.pipeline_owner",
+      "type": "azurerm_role_assignment",
+      "name": "pipeline_owner",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "role_definition_name": "Owner",
+          "scope": "/subscriptions/df52a190-4c1e-4c64-9291-993c10fc1c88"
+        }
+      }
+    },
+    {
+      "address": "azuread_application_password.pipeline",
+      "type": "azuread_application_password",
+      "name": "pipeline",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "display_name": "pipeline-secret"
+        }
+      }
+    },
+    {
+      "address": "azurerm_key_vault.claims",
+      "type": "azurerm_key_vault",
+      "name": "claims",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "kvclaimsdev",
+          "location": "switzerlandnorth",
+          "public_network_access_enabled": true,
+          "purge_protection_enabled": false,
+          "tags": {
+            "Environment": "dev",
+            "Owner": "platform-engineering",
+            "CostCenter": "CH-DEMO-4711"
+          }
+        }
+      }
+    }
+  ]
+}

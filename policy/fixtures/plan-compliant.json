@@ -1,0 +1,176 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.8",
+  "resource_changes": [
+    {
+      "address": "azurerm_resource_group.this",
+      "type": "azurerm_resource_group",
+      "name": "this",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "rg-riskguardian-dev-chn",
+          "location": "switzerlandnorth",
+          "tags": {
+            "Environment": "dev",
+            "Owner": "platform-engineering",
+            "CostCenter": "CH-DEMO-4711",
+            "DataClassification": "confidential"
+          }
+        }
+      }
+    },
+    {
+      "address": "module.storage.azurerm_storage_account.this",
+      "type": "azurerm_storage_account",
+      "name": "this",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "striskguardiandevchn",
+          "location": "switzerlandnorth",
+          "public_network_access_enabled": false,
+          "allow_nested_items_to_be_public": false,
+          "min_tls_version": "TLS1_2",
+          "enable_https_traffic_only": true,
+          "tags": {
+            "Environment": "dev",
+            "Owner": "platform-engineering",
+            "CostCenter": "CH-DEMO-4711",
+            "DataClassification": "confidential"
+          }
+        }
+      }
+    },
+    {
+      "address": "module.storage.azurerm_storage_container.this[\"claim-documents\"]",
+      "type": "azurerm_storage_container",
+      "name": "this",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "claim-documents",
+          "container_access_type": "private"
+        }
+      }
+    },
+    {
+      "address": "module.postgres.azurerm_postgresql_flexible_server.this",
+      "type": "azurerm_postgresql_flexible_server",
+      "name": "this",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "psql-riskguardian-dev-chn",
+          "location": "switzerlandnorth",
+          "public_network_access_enabled": false,
+          "backup_retention_days": 7,
+          "tags": {
+            "Environment": "dev",
+            "Owner": "claims-team",
+            "CostCenter": "CH-CLM-2201",
+            "DataClassification": "restricted"
+          }
+        }
+      }
+    },
+    {
+      "address": "module.keyvault.azurerm_key_vault.this",
+      "type": "azurerm_key_vault",
+      "name": "this",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "kvriskguardiandevchn",
+          "location": "switzerlandnorth",
+          "public_network_access_enabled": false,
+          "purge_protection_enabled": true,
+          "tags": {
+            "Environment": "dev",
+            "Owner": "platform-engineering",
+            "CostCenter": "CH-DEMO-4711",
+            "DataClassification": "restricted"
+          }
+        }
+      }
+    },
+    {
+      "address": "module.keyvault.azurerm_private_endpoint.this",
+      "type": "azurerm_private_endpoint",
+      "name": "this",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "pe-kvriskguardiandevchn",
+          "location": "switzerlandnorth",
+          "private_dns_zone_group": [
+            { "name": "default", "private_dns_zone_ids": ["/subscriptions/x/zone-vault"] }
+          ],
+          "private_service_connection": [
+            {
+              "name": "psc-kv",
+              "private_connection_resource_id": "/subscriptions/x/kv",
+              "subresource_names": ["vault"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "address": "module.storage.azurerm_private_endpoint.blob",
+      "type": "azurerm_private_endpoint",
+      "name": "blob",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "pe-st-blob",
+          "location": "switzerlandnorth",
+          "private_dns_zone_group": [
+            { "name": "default", "private_dns_zone_ids": ["/subscriptions/x/zone-blob"] }
+          ],
+          "private_service_connection": [
+            {
+              "name": "psc-blob",
+              "private_connection_resource_id": "/subscriptions/x/st",
+              "subresource_names": ["blob"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "address": "module.postgres.azurerm_private_endpoint.postgres",
+      "type": "azurerm_private_endpoint",
+      "name": "postgres",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "name": "pe-psql",
+          "location": "switzerlandnorth",
+          "private_dns_zone_group": [
+            { "name": "default", "private_dns_zone_ids": ["/subscriptions/x/zone-pg"] }
+          ],
+          "private_service_connection": [
+            {
+              "name": "psc-pg",
+              "private_connection_resource_id": "/subscriptions/x/pg",
+              "subresource_names": ["postgresqlServer"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "address": "module.claims.azurerm_role_assignment.acr_pull",
+      "type": "azurerm_role_assignment",
+      "name": "acr_pull",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "role_definition_name": "AcrPull",
+          "scope": "/subscriptions/df52a190-4c1e-4c64-9291-993c10fc1c88/resourceGroups/rg-riskguardian-dev-chn/providers/Microsoft.ContainerRegistry/registries/acrriskguardiandevchn"
+        }
+      }
+    }
+  ]
+}
