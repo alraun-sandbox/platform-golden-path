@@ -1,0 +1,90 @@
+name: Policy check
+description: >
+  Evaluate a Terraform plan against the organisation's Rego policy bundle and render the
+  verdict as reviewable markdown. Denials fail the step; warnings do not.
+
+inputs:
+  plan-json:
+    description: Path to `terraform show -json` output.
+    required: true
+  policy-path:
+    description: Directory containing the Rego policies.
+    required: false
+    default: policy/terraform
+  conftest-version:
+    required: false
+    default: '0.56.0'
+  fail-on-warn:
+    required: false
+    default: 'false'
+
+outputs:
+  summary:
+    description: Markdown summary of the policy verdict, for a pull request comment.
+    value: ${{ steps.evaluate.outputs.summary }}
+  violations:
+    description: Number of denials.
+    value: ${{ steps.evaluate.outputs.violations }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Conftest
+      shell: bash
+      run: |
+        set -euo pipefail
+        v="${{ inputs.conftest-version }}"
+        curl -sSfL "https://github.com/open-policy-agent/conftest/releases/download/v${v}/conftest_${v}_Linux_x86_64.tar.gz" \
+          | tar -xz -C /tmp conftest
+        /tmp/conftest --version
+
+    - name: Evaluate policies
+      id: evaluate
+      shell: bash
+      run: |
+        set -uo pipefail
+
+        /tmp/conftest test \
+          --policy "${{ inputs.policy-path }}" \
+          --output json \
+          --all-namespaces \
+          "${{ inputs.plan-json }}" > result.json || true
+
+        fails=$(jq '[.[].failures[]?] | length' result.json)
+        warns=$(jq '[.[].warnings[]?] | length' result.json)
+        echo "violations=${fails}" >> "$GITHUB_OUTPUT"
+
+        {
+          if [ "$fails" -eq 0 ] && [ "$warns" -eq 0 ]; then
+            echo "**PASS** — all organisation policies satisfied."
+          else
+            echo "| | Policy | Finding |"
+            echo "|---|--------|---------|"
+            jq -r '.[].failures[]? | "| DENY | \(.metadata.policy // "policy") | \(.msg) |"' result.json
+            jq -r '.[].warnings[]? | "| WARN | \(.metadata.policy // "policy") | \(.msg) |"' result.json
+            echo ""
+            echo "_${fails} denial(s), ${warns} warning(s). Denials block the merge; warnings do not._"
+          fi
+        } > summary.md
+
+        {
+          echo 'summary<<POLICY_EOF'
+          cat summary.md
+          echo 'POLICY_EOF'
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "## Policy as code"
+          echo ""
+          cat summary.md
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$fails" -gt 0 ]; then
+          echo "::error::${fails} policy violation(s). See the job summary."
+          exit 1
+        fi
+        if [ "${{ inputs.fail-on-warn }}" = "true" ] && [ "$warns" -gt 0 ]; then
+          echo "::error::${warns} policy warning(s) with fail-on-warn enabled."
+          exit 1
+        fi
+        exit 0
