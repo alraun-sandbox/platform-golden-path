@@ -1,0 +1,117 @@
+name: Reusable · .NET build & test
+
+# The paved road for every .NET service in the estate.
+#
+# A service repository consumes this in three lines. It does not own build logic, it does not
+# own the security wiring, and it cannot silently drift from the standard - the moment
+# platform-engineering changes this file, every service inherits the change.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        description: Path to the solution or project to build.
+        required: false
+        type: string
+        default: '.'
+      dotnet-version:
+        description: .NET SDK version.
+        required: false
+        type: string
+        default: '8.0.x'
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+      coverage-threshold:
+        description: Minimum line coverage percentage. The build fails below this.
+        required: false
+        type: number
+        default: 40
+    outputs:
+      version:
+        description: Version produced for this build.
+        value: ${{ jobs.build.outputs.version }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        shell: bash
+        run: echo "value=1.0.${GITHUB_RUN_NUMBER}+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        working-directory: ${{ inputs.project-path }}
+        run: dotnet restore
+
+      - name: Build
+        working-directory: ${{ inputs.project-path }}
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        if: inputs.run-tests
+        working-directory: ${{ inputs.project-path }}
+        run: |
+          dotnet test --no-build --configuration Release \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Enforce coverage threshold
+        if: inputs.run-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          report=$(find . -name 'coverage.cobertura.xml' | head -n 1)
+          if [ -z "$report" ]; then
+            echo "::warning::No coverage report produced - skipping threshold check."
+            exit 0
+          fi
+          rate=$(grep -o 'line-rate="[0-9.]*"' "$report" | head -n 1 | grep -o '[0-9.]*')
+          pct=$(awk "BEGIN { printf \"%.1f\", $rate * 100 }")
+          echo "Line coverage: ${pct}% (threshold ${{ inputs.coverage-threshold }}%)"
+          awk "BEGIN { exit !($pct >= ${{ inputs.coverage-threshold }}) }" || {
+            echo "::error::Coverage ${pct}% is below the required ${{ inputs.coverage-threshold }}%."
+            exit 1
+          }
+
+      - name: Publish test results
+        if: always() && inputs.run-tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-dotnet
+          path: '**/TestResults/**'
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Package
+        working-directory: ${{ inputs.project-path }}
+        run: dotnet publish --no-build --configuration Release --output ./publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-dotnet
+          path: ${{ inputs.project-path }}/publish
+          retention-days: 7
