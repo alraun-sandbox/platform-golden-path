@@ -1,0 +1,71 @@
+name: Reusable · Java build & test
+
+# Same paved road, different stack. The point of the demo is that a claims engineer and a risk
+# engineer get identical guarantees - identical gates, identical evidence, identical policy -
+# without either team having to implement them.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: '.'
+      java-version:
+        required: false
+        type: string
+        default: '17'
+      distribution:
+        required: false
+        type: string
+        default: 'temurin'
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: ${{ inputs.distribution }}
+          cache: maven
+
+      - name: Build
+        working-directory: ${{ inputs.project-path }}
+        run: mvn --batch-mode --no-transfer-progress clean compile
+
+      - name: Test
+        if: inputs.run-tests
+        working-directory: ${{ inputs.project-path }}
+        run: mvn --batch-mode --no-transfer-progress test
+
+      - name: Publish test results
+        if: always() && inputs.run-tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-java
+          path: ${{ inputs.project-path }}/**/target/surefire-reports/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Package
+        working-directory: ${{ inputs.project-path }}
+        run: mvn --batch-mode --no-transfer-progress package -DskipTests
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-java
+          path: ${{ inputs.project-path }}/target/*.jar
+          retention-days: 7
+          if-no-files-found: ignore
