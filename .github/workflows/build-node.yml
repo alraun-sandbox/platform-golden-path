@@ -1,0 +1,66 @@
+name: Reusable · Node build & test
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: '.'
+      node-version:
+        required: false
+        type: string
+        default: '20'
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+      build-command:
+        required: false
+        type: string
+        default: 'npm run build'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.project-path }}/package-lock.json
+
+      - name: Install
+        working-directory: ${{ inputs.project-path }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: ${{ inputs.project-path }}
+        run: npm run lint --if-present
+
+      - name: Typecheck
+        working-directory: ${{ inputs.project-path }}
+        run: npm run typecheck --if-present
+
+      - name: Test
+        if: inputs.run-tests
+        working-directory: ${{ inputs.project-path }}
+        run: npm test --if-present
+
+      - name: Build
+        working-directory: ${{ inputs.project-path }}
+        run: ${{ inputs.build-command }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-web
+          path: ${{ inputs.project-path }}/dist
+          retention-days: 7
+          if-no-files-found: ignore
