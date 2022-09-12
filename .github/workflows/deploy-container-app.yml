@@ -1,0 +1,180 @@
+name: Reusable · Build image & deploy Container App
+
+# Merge-time path. Builds, scans and deploys - and refuses to ship a critical finding.
+#
+# Policy 4 ("critical findings block release") lives here rather than in the pull request gate
+# on purpose: a PR gate that blocks on every transitive advisory teaches people to bypass it.
+# Block at the release boundary, warn earlier. That distinction is the whole argument for
+# pragmatic DevSecOps rather than maximal DevSecOps.
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        required: true
+        type: string
+      image-name:
+        required: true
+        type: string
+      context-path:
+        required: false
+        type: string
+        default: '.'
+      dockerfile:
+        required: false
+        type: string
+        default: 'Dockerfile'
+      environment:
+        required: false
+        type: string
+        default: 'dev'
+      resource-group:
+        required: true
+        type: string
+      registry:
+        description: ACR login server, e.g. acrriskguardiandev.azurecr.io
+        required: true
+        type: string
+      block-on-critical:
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+  security-events: write
+
+jobs:
+  deploy:
+    name: deploy-${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch shared policy bundle
+        uses: actions/checkout@v4
+        with:
+          repository: alraun-sandbox/platform-golden-path
+          path: .platform
+          sparse-checkout: policy
+          sparse-checkout-cone-mode: false
+
+      - name: Derive image tag
+        id: meta
+        shell: bash
+        run: |
+          # Immutable tags only. Scenario 6 in the flaw catalogue is a Dockerfile pinned to
+          # :latest - Conftest rejects it below, and this step is why we can.
+          echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "image=${{ inputs.registry }}/${{ inputs.image-name }}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Dockerfile policy check
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz \
+            | tar -xz -C /tmp conftest
+          /tmp/conftest test \
+            --policy .platform/policy/container \
+            --parser dockerfile \
+            "${{ inputs.context-path }}/${{ inputs.dockerfile }}"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build image
+        run: |
+          docker build \
+            --file "${{ inputs.context-path }}/${{ inputs.dockerfile }}" \
+            --tag "${{ steps.meta.outputs.image }}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            "${{ inputs.context-path }}"
+
+      - name: Scan image
+        id: scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+
+      - name: Upload image scan results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: container-image
+
+      - name: Block release on critical findings
+        if: inputs.block-on-critical
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Push image
+        run: |
+          az acr login --name "$(echo '${{ inputs.registry }}' | cut -d. -f1)"
+          docker push "${{ steps.meta.outputs.image }}"
+
+      - name: Deploy Container App
+        run: |
+          az containerapp update \
+            --name "${{ inputs.service-name }}" \
+            --resource-group "${{ inputs.resource-group }}" \
+            --image "${{ steps.meta.outputs.image }}" \
+            --output none
+
+      - name: Wait for healthy revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            state=$(az containerapp revision list \
+              --name "${{ inputs.service-name }}" \
+              --resource-group "${{ inputs.resource-group }}" \
+              --query "[?properties.active].properties.healthState | [0]" -o tsv)
+            echo "attempt ${attempt}: ${state}"
+            [ "$state" = "Healthy" ] && exit 0
+            sleep 15
+          done
+          echo "::error::Revision did not become healthy in time."
+          exit 1
+
+      - name: Record deployment evidence
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Deployment · ${{ inputs.service-name }} → ${{ inputs.environment }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Image | \`${{ steps.meta.outputs.image }}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Actor | @${GITHUB_ACTOR} |"
+            echo "| Run | ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} |"
+            echo "| Auth | Workload identity federation - no stored secret |"
+          } >> "$GITHUB_STEP_SUMMARY"
