@@ -1,0 +1,166 @@
+name: Reusable · Terraform plan & policy
+
+# Act 4. The pull request is where policy is enforced, and the enforcement is *readable*:
+# the plan and the policy verdict land as a comment, so a reviewer sees the decision and the
+# reason, not a red X.
+#
+# Deliberately plan-only. Apply happens on merge, from a protected environment. Nothing in a
+# demo - or in a real enterprise - should wait on a thirty-minute apply inside a code review.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: false
+        type: string
+        default: 'terraform'
+      environment:
+        description: Which tfvars/backend key to plan against.
+        required: false
+        type: string
+        default: 'dev'
+      terraform-version:
+        required: false
+        type: string
+        default: '1.9.8'
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  plan:
+    name: terraform-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch shared policy bundle
+        uses: actions/checkout@v4
+        with:
+          repository: alraun-sandbox/platform-golden-path
+          path: .platform
+          sparse-checkout: policy
+          sparse-checkout-cone-mode: false
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      # No stored credentials anywhere in this estate. The runner exchanges its
+      # short-lived OIDC token for an Azure token scoped to one resource group.
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Format check
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          ARM_USE_OIDC: 'true'
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: terraform init -input=false
+
+      - name: Validate
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform validate
+
+      - name: Plan
+        id: plan
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          ARM_USE_OIDC: 'true'
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -o pipefail
+          terraform plan -input=false -lock=false \
+            -var-file="environments/${{ inputs.environment }}.tfvars" \
+            -out=tfplan | tee plan.txt
+          terraform show -json tfplan > plan.json
+
+      # ---------------------------------------------------------------------
+      # Policy as code. The same bundle runs here and in the pre-commit hook,
+      # so a developer sees the same verdict locally that CI will produce.
+      # ---------------------------------------------------------------------
+      - name: Policy check
+        id: policy
+        uses: alraun-sandbox/platform-golden-path/actions/policy-check@main
+        with:
+          plan-json: ${{ inputs.working-directory }}/plan.json
+          policy-path: .platform/policy/terraform
+
+      - name: Comment on pull request
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          POLICY_RESULT: ${{ steps.policy.outputs.summary }}
+        with:
+          script: |
+            const fs = require('fs');
+            const dir = '${{ inputs.working-directory }}';
+            let plan = '';
+            try {
+              plan = fs.readFileSync(`${dir}/plan.txt`, 'utf8');
+            } catch { plan = '_Plan did not complete._'; }
+            if (plan.length > 55000) {
+              plan = plan.slice(0, 55000) + '\n\n... truncated, see the workflow log ...';
+            }
+            const policy = process.env.POLICY_RESULT || '_Policy check did not run._';
+            const marker = '<!-- riskguardian-terraform-plan -->';
+            const body = [
+              marker,
+              `### Terraform plan · \`${{ inputs.environment }}\``,
+              '',
+              '#### Policy verdict',
+              '',
+              policy,
+              '',
+              '<details><summary>Plan output</summary>',
+              '',
+              '```terraform',
+              plan,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const existing = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const mine = existing.data.find(c => c.body && c.body.includes(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: |
+            ${{ inputs.working-directory }}/plan.json
+            ${{ inputs.working-directory }}/plan.txt
+          retention-days: 7
+          if-no-files-found: ignore
