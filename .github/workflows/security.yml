@@ -1,0 +1,171 @@
+name: Reusable · Security
+
+# The shift-left gate. Every service inherits it; no service implements it.
+#
+# Design note - why this runs CodeQL rather than relying on default setup:
+# default setup gives a zero-effort baseline but cannot run *our* queries. The PII-in-logs rule
+# that catches the Act 3 defect is a Zurich compliance rule, not a stock CodeQL rule, so the
+# estate uses advanced setup with the shared query pack from this repository. Uniform across
+# every repo, and it encodes our regulations rather than someone else's defaults.
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        description: CodeQL language - csharp, java, javascript-typescript, actions.
+        required: true
+        type: string
+      build-mode:
+        description: none | autobuild | manual
+        required: false
+        type: string
+        default: 'none'
+      build-command:
+        description: >
+          Build command for build-mode: manual. Ignored otherwise. Required when
+          build-mode is manual - CodeQL observes a compiler doing real work, so
+          something has to run between init and analyze.
+        required: false
+        type: string
+        default: ''
+      project-path:
+        required: false
+        type: string
+        default: '.'
+      fail-on-severity:
+        description: Dependency review threshold - low | moderate | high | critical.
+        required: false
+        type: string
+        default: 'high'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # SAST - including the custom compliance queries
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: security
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch shared compliance queries
+        uses: actions/checkout@v4
+        with:
+          repository: alraun-sandbox/platform-golden-path
+          path: .platform
+          sparse-checkout: codeql
+          sparse-checkout-cone-mode: false
+
+      # The compliance pack is per-language. Where we have written rules for a language they
+      # are added to the stock suite; where we have not, the stock suite still runs.
+      - name: Resolve query pack
+        id: queries
+        shell: bash
+        run: |
+          pack=".platform/codeql/queries/${{ inputs.language }}"
+          if [ -d "$pack" ]; then
+            echo "Using Zurich compliance pack: ${pack}"
+            echo "value=security-extended,${pack}" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Zurich compliance pack for ${{ inputs.language }} - stock suite only."
+            echo "value=security-extended" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ inputs.language }}
+          build-mode: ${{ inputs.build-mode }}
+          queries: ${{ steps.queries.outputs.value }}
+          config: |
+            paths-ignore:
+              - '**/bin/**'
+              - '**/obj/**'
+              - '**/node_modules/**'
+              - '**/dist/**'
+
+      # build-mode: manual means CodeQL watches a real compilation. Without a
+      # build here, init succeeds, analyze finds no compiler traces and the scan
+      # reports zero results - a green check on an unscanned repository, which
+      # is the worst possible outcome of a security workflow.
+      - name: Guard manual build mode
+        if: inputs.build-mode == 'manual' && inputs.build-command == ''
+        shell: bash
+        run: |
+          echo "::error::build-mode 'manual' requires a build-command input." >&2
+          exit 1
+
+      - name: Set up JDK (manual Java builds)
+        if: inputs.build-mode == 'manual' && inputs.language == 'java'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build (manual mode)
+        if: inputs.build-mode == 'manual'
+        working-directory: ${{ inputs.project-path }}
+        shell: bash
+        run: ${{ inputs.build-command }}
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ inputs.language }}
+
+  # ---------------------------------------------------------------------------
+  # Supply chain - blocks the pull request, not the release
+  # ---------------------------------------------------------------------------
+  dependency-review:
+    name: dependencies
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+          # Copyleft licences are a legal risk in a commercial insurance product.
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          comment-summary-in-pr: on-failure
+
+  # ---------------------------------------------------------------------------
+  # Evidence - so the gate result is legible to a human, not just to a bot
+  # ---------------------------------------------------------------------------
+  summary:
+    name: security-summary
+    runs-on: ubuntu-latest
+    needs: [codeql, dependency-review]
+    if: always()
+
+    steps:
+      - name: Write job summary
+        shell: bash
+        run: |
+          {
+            echo "## Security gate"
+            echo ""
+            echo "| Check | Result |"
+            echo "|-------|--------|"
+            echo "| CodeQL (security-extended + Zurich compliance pack) | ${{ needs.codeql.result }} |"
+            echo "| Dependency review (fail-on: ${{ inputs.fail-on-severity }}) | ${{ needs.dependency-review.result }} |"
+            echo ""
+            echo "Secret scanning and push protection are enforced by the organisation"
+            echo "security configuration, before code ever reaches this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any gate failed
+        if: needs.codeql.result == 'failure' || needs.dependency-review.result == 'failure'
+        run: exit 1
