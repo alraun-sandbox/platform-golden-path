@@ -1,0 +1,24 @@
+# Compliant reference Dockerfile for a .NET service on the golden path.
+# Digest-pinned, non-root, healthcheck present, no credentials in build arguments.
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:35792ea4ad1db051981f62b313f1be3b46b1f45cadbaa638c6c9d2ec6b8f8a8b AS build
+WORKDIR /src
+COPY *.csproj ./
+RUN dotnet restore
+COPY . .
+RUN dotnet publish -c Release -o /app --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0@sha256:0f6b5a2e0bce5b1ad0b6c9c9a9b2f9d2a1f9c7d3b5e8a0c2f4d6b8a0c2e4f6d8
+WORKDIR /app
+COPY --from=build /app .
+
+RUN adduser --system --uid 10001 --group appuser
+USER appuser
+
+EXPOSE 8080
+ENV ASPNETCORE_URLS=http://+:8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD ["/app/RiskGuardian.Claims", "--healthcheck"]
+
+ENTRYPOINT ["dotnet", "RiskGuardian.Claims.dll"]

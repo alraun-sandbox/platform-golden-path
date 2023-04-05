@@ -1,0 +1,17 @@
+# Scenario 6 in the flaw catalogue. Every line here is one somebody has actually shipped.
+#
+# :latest base image      -> the build is not reproducible
+# no USER instruction     -> the container runs as root
+# credential in ARG       -> persists in image history for anyone who pulls the image
+# no HEALTHCHECK          -> rollout health cannot be verified
+
+FROM mcr.microsoft.com/dotnet/aspnet:latest
+
+ARG DB_PASSWORD
+ARG NUGET_API_KEY
+
+WORKDIR /app
+COPY . .
+
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "RiskGuardian.Claims.dll"]
