@@ -1,0 +1,123 @@
+name: Self-test
+
+# The platform repository holds itself to the standard it sets.
+#
+# Two of these jobs are worth pointing at during Act 4: the policy bundle is regression-tested
+# against a compliant and a deliberately non-compliant Terraform plan, so "the policy works" is
+# a build result rather than an assertion. Policy that is not tested is just documentation with
+# a worse error message.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: policy bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conftest
+        run: |
+          set -euo pipefail
+          v=0.56.0
+          curl -sSfL "https://github.com/open-policy-agent/conftest/releases/download/v${v}/conftest_${v}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin conftest
+          conftest --version
+
+      - name: Rego is well formed
+        run: conftest fmt --check policy
+
+      - name: A compliant plan passes
+        run: conftest test --policy policy/terraform --all-namespaces policy/fixtures/plan-compliant.json
+
+      - name: A non-compliant plan is rejected
+        run: |
+          if conftest test --policy policy/terraform --all-namespaces policy/fixtures/plan-violating.json; then
+            echo "::error::The violating fixture passed. The policy bundle has regressed."
+            exit 1
+          fi
+          echo "Violating fixture correctly rejected."
+
+      - name: A compliant Dockerfile passes
+        run: conftest test --policy policy/container --parser dockerfile --all-namespaces policy/fixtures/Dockerfile.compliant
+
+      - name: A non-compliant Dockerfile is rejected
+        run: |
+          if conftest test --policy policy/container --parser dockerfile --all-namespaces policy/fixtures/Dockerfile.violating; then
+            echo "::error::The violating Dockerfile passed. The container policy has regressed."
+            exit 1
+          fi
+          echo "Violating Dockerfile correctly rejected."
+
+  terraform:
+    name: terraform modules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Format
+        run: terraform fmt -check -recursive terraform-modules
+
+      - name: Validate every module
+        run: |
+          set -euo pipefail
+          for dir in terraform-modules/*/; do
+            echo "::group::${dir}"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            echo "::endgroup::"
+          done
+
+  workflows:
+    name: workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: actionlint
+        uses: docker://rhysd/actionlint:latest
+        with:
+          args: -color
+
+  codeql-queries:
+    name: compliance queries compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          build-mode: none
+
+      # Compiling the pack is the cheapest way to catch a broken query before it silently
+      # stops protecting every repository in the estate.
+      - name: Compile the C# compliance pack
+        run: |
+          set -euo pipefail
+          codeql=$(find "$RUNNER_TOOL_CACHE" -name codeql -type f | head -n 1)
+          "$codeql" pack install codeql/queries/csharp
+          "$codeql" query compile --threads=0 codeql/queries/csharp
+
+      - name: Compile the Java compliance pack
+        run: |
+          set -euo pipefail
+          codeql=$(find "$RUNNER_TOOL_CACHE" -name codeql -type f | head -n 1)
+          "$codeql" pack install codeql/queries/java
+          "$codeql" query compile --threads=0 codeql/queries/java
