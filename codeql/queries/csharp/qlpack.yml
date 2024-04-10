@@ -1,0 +1,6 @@
+name: zurich/riskguardian-csharp-queries
+version: 1.0.0
+library: false
+dependencies:
+  codeql/csharp-all: "*"
+suites: zurich-compliance.qls
