@@ -1,0 +1,6 @@
+name: zurich/riskguardian-java-queries
+version: 1.0.0
+library: false
+dependencies:
+  codeql/java-all: "*"
+suites: zurich-compliance.qls

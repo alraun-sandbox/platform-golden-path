@@ -1,0 +1,3 @@
+- description: Zurich RiskGuardian compliance rules (Java)
+- queries: .
+  from: zurich/riskguardian-java-queries
