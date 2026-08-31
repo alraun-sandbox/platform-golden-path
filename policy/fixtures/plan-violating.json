@@ -74,7 +74,7 @@
         "actions": ["create"],
         "after": {
           "role_definition_name": "Owner",
-          "scope": "/subscriptions/df52a190-4c1e-4c64-9291-993c10fc1c88"
+          "scope": "/subscriptions/00000000-0000-0000-0000-000000000000"
         }
       }
     },

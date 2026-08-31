@@ -56,6 +56,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # NOTE ON VISIBILITY - this step is why platform-golden-path is not private.
+      #
+      # A workflow's GITHUB_TOKEN is scoped to the repository it runs in. Being in the same
+      # organisation grants it nothing. So a private central repository can be *called* as a
+      # reusable workflow (Actions arranges that separately) while being unreadable to the very
+      # workflow it is running - which is exactly what happened here: the estate's security scans
+      # failed with "Not Found - .../get-a-repository", because GitHub returns 404 rather than 403
+      # for things you may not know exist. The error names no repository and suggests no cause.
+      #
+      # Three ways out: make this repository readable by its consumers, hand every consumer a
+      # token, or publish the queries as a CodeQL pack to a registry. Handing out tokens to read
+      # your own standards is the worst of the three - it puts a credential in ten repositories
+      # to distribute a file with no secrets in it.
       - name: Fetch shared compliance queries
         uses: actions/checkout@v4
         with:
