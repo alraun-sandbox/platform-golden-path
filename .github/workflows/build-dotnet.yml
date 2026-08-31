@@ -10,10 +10,21 @@ on:
   workflow_call:
     inputs:
       project-path:
-        description: Path to the solution or project to build.
+        description: >-
+          Path to the solution or project to restore, build and test. Passed as an argument to
+          the dotnet CLI, so a .sln or .csproj is expected - not a directory to run inside.
         required: false
         type: string
         default: '.'
+      publish-project:
+        description: >-
+          Optional path to a single project to `dotnet publish` as a build artifact. Must be one
+          project, never a solution: `dotnet publish --output` against a solution fails with
+          NETSDK1194. Leave empty when the deployable is a container built from a Dockerfile,
+          which is the normal case here - then no artifact is produced and nothing is wasted.
+        required: false
+        type: string
+        default: ''
       dotnet-version:
         description: .NET SDK version.
         required: false
@@ -63,18 +74,15 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
-        working-directory: ${{ inputs.project-path }}
-        run: dotnet restore
+        run: dotnet restore "${{ inputs.project-path }}"
 
       - name: Build
-        working-directory: ${{ inputs.project-path }}
-        run: dotnet build --no-restore --configuration Release
+        run: dotnet build "${{ inputs.project-path }}" --no-restore --configuration Release
 
       - name: Test
         if: inputs.run-tests
-        working-directory: ${{ inputs.project-path }}
         run: |
-          dotnet test --no-build --configuration Release \
+          dotnet test "${{ inputs.project-path }}" --no-build --configuration Release \
             --logger "trx;LogFileName=test-results.trx" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
@@ -107,11 +115,14 @@ jobs:
           if-no-files-found: ignore
 
       - name: Package
-        working-directory: ${{ inputs.project-path }}
-        run: dotnet publish --no-build --configuration Release --output ./publish
+        if: inputs.publish-project != ''
+        run: |
+          dotnet publish "${{ inputs.publish-project }}" \
+            --no-build --configuration Release --output ./publish
 
       - uses: actions/upload-artifact@v4
+        if: inputs.publish-project != ''
         with:
           name: app-dotnet
-          path: ${{ inputs.project-path }}/publish
+          path: ./publish
           retention-days: 7
