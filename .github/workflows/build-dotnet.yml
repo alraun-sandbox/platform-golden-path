@@ -92,14 +92,60 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          report=$(find . -name 'coverage.cobertura.xml' | head -n 1)
-          if [ -z "$report" ]; then
-            echo "::warning::No coverage report produced - skipping threshold check."
-            exit 0
+
+          # This used to be `find ... | head -n 1` plus a grep for the first line-rate
+          # attribute. Two things were wrong with that, and both were invisible while the
+          # pipeline was failing earlier for other reasons:
+          #
+          #   1. A solution with several test projects produces several cobertura reports.
+          #      Taking the first one that `find` happens to return measured one arbitrary
+          #      test project and called it the coverage of the repository. Adding a small,
+          #      well-tested project could push the number up while the codebase got worse.
+          #   2. When the grep found nothing, `rate` was empty, and the arithmetic became
+          #      `printf "%.1f",  * 100` - an awk syntax error. The step exited 2 with no
+          #      message, which reads like infrastructure flakiness rather than a broken
+          #      quality gate.
+          #
+          # Aggregate every report instead, by summing covered and valid lines across all of
+          # them, and fail loudly if the inputs are missing rather than silently.
+          mapfile -t reports < <(find . -name 'coverage.cobertura.xml' -not -path './.git/*')
+
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "::error::No coverage report was produced. The threshold check cannot pass by default - if this project genuinely has no tests, set run-tests: false explicitly."
+            exit 1
           fi
-          rate=$(grep -o 'line-rate="[0-9.]*"' "$report" | head -n 1 | grep -o '[0-9.]*')
-          pct=$(awk "BEGIN { printf \"%.1f\", $rate * 100 }")
-          echo "Line coverage: ${pct}% (threshold ${{ inputs.coverage-threshold }}%)"
+
+          echo "Found ${#reports[@]} coverage report(s)."
+
+          pct=$(python3 - "${reports[@]}" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+
+          covered = valid = 0
+          for path in sys.argv[1:]:
+              root = ET.parse(path).getroot()
+              c = int(root.get('lines-covered', 0))
+              v = int(root.get('lines-valid', 0))
+              covered += c
+              valid += v
+              rate = (100.0 * c / v) if v else 0.0
+              print(f"  {rate:5.1f}%  {c:>6}/{v:<6}  {path}", file=sys.stderr)
+
+          if valid == 0:
+              print("  no measurable lines in any report", file=sys.stderr)
+              sys.exit(3)
+
+          print(f"{100.0 * covered / valid:.1f}")
+          PY
+          )
+
+          echo "Total line coverage: ${pct}% (threshold ${{ inputs.coverage-threshold }}%)"
+
+          {
+            echo "### Coverage"
+            echo ""
+            echo "Total line coverage **${pct}%** against a threshold of ${{ inputs.coverage-threshold }}%, aggregated over ${#reports[@]} report(s)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
           awk "BEGIN { exit !($pct >= ${{ inputs.coverage-threshold }}) }" || {
             echo "::error::Coverage ${pct}% is below the required ${{ inputs.coverage-threshold }}%."
             exit 1

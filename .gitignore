@@ -19,7 +19,10 @@ build/
 .gradle/
 # Terraform working state. State and plans can carry resource identifiers and secrets.
 **/.terraform/
-**/.terraform.lock.hcl
+# The dependency lock file IS committed - it is what pins provider versions and their
+# checksums, so a plan on a runner resolves exactly what was reviewed. Ignoring it would
+# quietly reintroduce the supply-chain drift the rest of this platform exists to prevent.
+# .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan
