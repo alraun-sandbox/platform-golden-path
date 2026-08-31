@@ -118,10 +118,22 @@ jobs:
           echo "Found ${#reports[@]} coverage report(s)."
 
           pct=$(python3 - "${reports[@]}" <<'PY'
-          import sys, xml.etree.ElementTree as ET
+          import hashlib, sys, xml.etree.ElementTree as ET
 
+          # VSTest writes each cobertura report twice: once under TestResults/<guid>/ and again
+          # as an attachment copy under TestResults/_<machine>_<timestamp>/In/<machine>/. Both
+          # are found by the search. Counting a report twice is harmless only if every report
+          # is duplicated the same number of times; if one is and another is not, the weighted
+          # average silently shifts toward the duplicated project. Deduplicate by content.
+          seen = set()
           covered = valid = 0
           for path in sys.argv[1:]:
+              digest = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+              if digest in seen:
+                  print(f"  (duplicate)   {path}", file=sys.stderr)
+                  continue
+              seen.add(digest)
+
               root = ET.parse(path).getroot()
               c = int(root.get('lines-covered', 0))
               v = int(root.get('lines-valid', 0))
