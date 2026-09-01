@@ -257,7 +257,11 @@ jobs:
         if: inputs.language == 'csharp'
         uses: actions/setup-dotnet@v4
         with:
-          global-json-file: global.json
+          # Not global-json-file. These repositories pin "8.0.0" with
+          # rollForward: latestMajor, which the SDK resolves happily at build time
+          # but setup-dotnet reads as a literal download request - and 8.0.0 was
+          # delisted long ago, so it 404s. Same floating band the build uses.
+          dotnet-version: '8.0.x'
 
       - name: Restore so the detector has resolved versions to read
         if: inputs.language == 'csharp'
