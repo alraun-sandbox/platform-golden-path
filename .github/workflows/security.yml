@@ -39,6 +39,9 @@ on:
         default: 'high'
 
 permissions:
+  # Deliberately read at the workflow level. Only the dependency-snapshot job below
+  # raises this to write, because the dependency submission API requires it. Callers
+  # must grant contents: write for that job to work, but nothing else here gets it.
   contents: read
   security-events: write
   actions: read
@@ -146,7 +149,11 @@ jobs:
   dependency-review:
     name: dependencies
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    # Waits for the snapshot so the review diffs a graph that knows its versions.
+    # always() because the snapshot job is skipped for fork pull requests, and a
+    # skipped dependency would otherwise skip this gate silently.
+    needs: [dependency-snapshot]
+    if: always() && github.event_name == 'pull_request'
 
     steps:
       - uses: actions/checkout@v4
@@ -208,6 +215,42 @@ jobs:
           parser: dockerfile
           policy-path: .platform/policy/container
           title: Container policy
+
+  # ---------------------------------------------------------------------------
+  # Dependency graph - so the other supply-chain controls have something to read
+  # ---------------------------------------------------------------------------
+  # GitHub's static dependency graph parses manifests without building them. Under
+  # central package management a project file says
+  #
+  #     <PackageReference Include="Azure.Identity" />
+  #
+  # with the version living in Directory.Packages.props, and the graph records the
+  # requirement as ">= 0". Measured on this estate: every NuGet package, in every
+  # repository, unversioned. No advisory can match ">= 0", so Dependabot alerts and
+  # dependency review were both structurally incapable of firing -- and the Security
+  # tab looked clean because it was blind, not because the code was safe.
+  #
+  # This job resolves the graph the way the build does and submits it. It is the
+  # difference between a dependency control and a dependency decoration.
+  dependency-snapshot:
+    name: dependency-snapshot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # A pull request from a fork gets a read-only token, so submission would fail.
+    # Nothing is lost: the base branch snapshot still carries the versions.
+    if: github.event.pull_request.head.repo.fork != true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Submit resolved dependencies
+        uses: advanced-security/component-detection-dependency-submission-action@v0.1.4
+        with:
+          # Associate the snapshot with the head commit rather than the synthetic
+          # merge commit, so dependency review diffs the branch a human can see.
+          snapshot-sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          snapshot-ref: ${{ github.event.pull_request.head.ref && format('refs/heads/{0}', github.event.pull_request.head.ref) || github.ref }}
 
   # ---------------------------------------------------------------------------
   # Evidence - so the gate result is legible to a human, not just to a bot
