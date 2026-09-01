@@ -30,6 +30,12 @@ on:
         required: true
       AZURE_SUBSCRIPTION_ID:
         required: true
+      # A JSON object of Terraform variable name to value, exported as TF_VAR_<name> around
+      # plan. Terraform variables without defaults are a hard failure at plan time, and a
+      # reusable workflow cannot know which ones a given repository has. Naming them here
+      # individually would push one repository's schema into everyone else's platform.
+      TF_VARS_JSON:
+        required: false
 
 permissions:
   contents: read
@@ -49,6 +55,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: alraun-sandbox/platform-golden-path
+          # Pinned. An unpinned checkout resolves to the default branch, so the rules that
+          # gate a pull request would change the moment anyone merged to platform-golden-path
+          # - including while the pull request was open. The whole point of a central bundle
+          # is that a team knows which version judged them.
+          ref: v1
           path: .platform
           sparse-checkout: policy
           sparse-checkout-cone-mode: false
@@ -92,11 +103,39 @@ jobs:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VARS_JSON: ${{ secrets.TF_VARS_JSON }}
         run: |
+          set -euo pipefail
+
+          # Export TF_VAR_<name> for each entry, without ever echoing a value. Written to
+          # $GITHUB_ENV rather than evaluated inline so that no value can end up in the
+          # command that appears in the log.
+          if [ -n "${TF_VARS_JSON:-}" ]; then
+            count=$(python3 -c '
+          import json, os, sys
+          d = json.loads(os.environ["TF_VARS_JSON"])
+          with open(os.environ["GITHUB_ENV"], "a") as fh:
+              for k, v in d.items():
+                  fh.write(f"TF_VAR_{k}<<TFVAREOF\n{v}\nTFVAREOF\n")
+          print(len(d))
+          ')
+            echo "Exported ${count} Terraform variable(s) from TF_VARS_JSON."
+          fi
+
+          # Some layouts keep one directory per environment and no tfvars file at all. Pass
+          # -var-file only when there is one, rather than failing on a file the repository
+          # was never meant to have.
+          args=()
+          varfile="environments/${{ inputs.environment }}.tfvars"
+          if [ -f "$varfile" ]; then
+            echo "Using $varfile"
+            args+=(-var-file="$varfile")
+          else
+            echo "No $varfile; planning with variables from the environment."
+          fi
+
           set -o pipefail
-          terraform plan -input=false -lock=false \
-            -var-file="environments/${{ inputs.environment }}.tfvars" \
-            -out=tfplan | tee plan.txt
+          terraform plan -input=false -lock=false "${args[@]}" -out=tfplan | tee plan.txt
           terraform show -json tfplan > plan.json
 
       # ---------------------------------------------------------------------
@@ -105,7 +144,7 @@ jobs:
       # ---------------------------------------------------------------------
       - name: Policy check
         id: policy
-        uses: alraun-sandbox/platform-golden-path/actions/policy-check@main
+        uses: alraun-sandbox/platform-golden-path/actions/policy-check@v1
         with:
           plan-json: ${{ inputs.working-directory }}/plan.json
           policy-path: .platform/policy/terraform
