@@ -112,7 +112,16 @@ jobs:
             echo "No TF_VARS_JSON supplied; nothing to export."
             exit 0
           fi
-          count=$(python3 -c '
+          # ::add-mask:: is a workflow command, which means the runner only honours it
+          # if it reaches the runner's log stream. An earlier version of this step ran
+          # `count=$(python3 -c '...' | tail -n 1)`, so every mask command was swallowed
+          # by the command substitution and nothing was ever masked -- while the step
+          # still cheerfully reported "Exported 2 Terraform variable(s)". The secrets
+          # then appeared in plaintext in the env block of every later step.
+          #
+          # So: python's stdout must go straight to the log, and the count travels out
+          # of band through a file.
+          python3 -c '
           import json, os
           d = json.loads(os.environ["TF_VARS_JSON"])
           with open(os.environ["GITHUB_ENV"], "a") as fh:
@@ -122,9 +131,10 @@ jobs:
                   # through a Terraform error message quoting the value.
                   print(f"::add-mask::{v}")
                   fh.write(f"TF_VAR_{k}<<TFVAREOF\n{v}\nTFVAREOF\n")
-          print(len(d))
-          ' | tail -n 1)
-          echo "Exported ${count} Terraform variable(s) from TF_VARS_JSON."
+          with open(os.environ["RUNNER_TEMP"] + "/tfvar-count", "w") as fh:
+              fh.write(str(len(d)))
+          '
+          echo "Exported $(cat "${RUNNER_TEMP}/tfvar-count") Terraform variable(s) from TF_VARS_JSON."
 
       - name: Plan
         id: plan
