@@ -94,8 +94,8 @@ jobs:
           set -euo pipefail
 
           # This used to be `find ... | head -n 1` plus a grep for the first line-rate
-          # attribute. Two things were wrong with that, and both were invisible while the
-          # pipeline was failing earlier for other reasons:
+          # attribute. Three things were wrong, and each was invisible while the pipeline
+          # was failing earlier for other reasons:
           #
           #   1. A solution with several test projects produces several cobertura reports.
           #      Taking the first one that `find` happens to return measured one arbitrary
@@ -105,9 +105,19 @@ jobs:
           #      `printf "%.1f",  * 100` - an awk syntax error. The step exited 2 with no
           #      message, which reads like infrastructure flakiness rather than a broken
           #      quality gate.
+          #   3. Summing lines-covered and lines-valid across reports looked like the
+          #      obvious fix and was still wrong. Cobertura reports overlap: two test
+          #      projects that both reference the API project each report every line of it,
+          #      so the same source line is counted once per report. The denominator then
+          #      grows with the number of test projects rather than with the size of the
+          #      codebase. Adding a unit-test project to riskguardian-claims moved the
+          #      reported figure from 67.3% to 48.8% without touching a line of production
+          #      code, and the build failed for a drop that had not happened.
           #
-          # Aggregate every report instead, by summing covered and valid lines across all of
-          # them, and fail loudly if the inputs are missing rather than silently.
+          # Take the union instead. A line is covered if any report saw it hit, and the
+          # denominator is the number of distinct lines anyone measured. That is what a
+          # coverage merge tool does, it is the only aggregation a developer can act on,
+          # and it makes duplicate reports harmless by construction.
           mapfile -t reports < <(find . -name 'coverage.cobertura.xml' -not -path './.git/*')
 
           if [ ${#reports[@]} -eq 0 ]; then
@@ -122,11 +132,10 @@ jobs:
 
           # VSTest writes each cobertura report twice: once under TestResults/<guid>/ and again
           # as an attachment copy under TestResults/_<machine>_<timestamp>/In/<machine>/. Both
-          # are found by the search. Counting a report twice is harmless only if every report
-          # is duplicated the same number of times; if one is and another is not, the weighted
-          # average silently shifts toward the duplicated project. Deduplicate by content.
+          # are found by the search. The union below would absorb the repeat anyway; dedupe by
+          # content so the per-report diagnostic listing stays readable.
           seen = set()
-          covered = valid = 0
+          lines = {}
           for path in sys.argv[1:]:
               digest = hashlib.sha256(open(path, 'rb').read()).hexdigest()
               if digest in seen:
@@ -137,16 +146,22 @@ jobs:
               root = ET.parse(path).getroot()
               c = int(root.get('lines-covered', 0))
               v = int(root.get('lines-valid', 0))
-              covered += c
-              valid += v
               rate = (100.0 * c / v) if v else 0.0
               print(f"  {rate:5.1f}%  {c:>6}/{v:<6}  {path}", file=sys.stderr)
 
-          if valid == 0:
+              for cls in root.iter('class'):
+                  filename = cls.get('filename')
+                  for line in cls.iter('line'):
+                      key = (filename, line.get('number'))
+                      lines[key] = lines.get(key, False) or int(line.get('hits', 0)) > 0
+
+          if not lines:
               print("  no measurable lines in any report", file=sys.stderr)
               sys.exit(3)
 
-          print(f"{100.0 * covered / valid:.1f}")
+          covered = sum(1 for hit in lines.values() if hit)
+          print(f"  union         {covered:>6}/{len(lines):<6}", file=sys.stderr)
+          print(f"{100.0 * covered / len(lines):.1f}")
           PY
           )
 
