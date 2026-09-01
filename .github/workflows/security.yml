@@ -177,6 +177,11 @@ jobs:
 
           gh api "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?state=open&ref=${REF}&per_page=100" > alerts.json
 
+          # Only alerts the pull request *introduces* appear on the merge ref. The estate carries
+          # 17 pre-existing medium findings on main; none of them show up here, so this gate stops
+          # new debt without holding every team hostage to the backlog. Burning that down is
+          # deliberate work (Act 5), not a side effect of blocking everybody.
+
           jq --argjson min "$min" -r '
             {"critical":4,"high":3,"medium":2,"low":1} as $r
             | [ .[] | select(($r[.rule.security_severity_level // ""] // 0) >= $min) ]
