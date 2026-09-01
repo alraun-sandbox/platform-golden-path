@@ -244,6 +244,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Component detection reads project.assets.json for NuGet. That file is
+      # produced by restore, so on a bare checkout the three NuGet detectors find
+      # zero components and the job cheerfully submits an empty snapshot. It was
+      # green and it changed nothing - measured: claims still had 24 of 28
+      # packages recorded as ">= 0" after a "successful" submission.
+      #
+      # Maven and npm do not need this: their detectors read pom.xml and
+      # package-lock.json directly, which is why those two ecosystems were
+      # already resolved correctly.
+      - name: Set up .NET
+        if: inputs.language == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore so the detector has resolved versions to read
+        if: inputs.language == 'csharp'
+        # This job describes dependencies; it does not judge them. The build gate
+        # already turns NuGet audit warnings into errors, and letting that happen
+        # here too would mean the one branch we most want a snapshot for - the one
+        # with a vulnerable package - is the one that fails to produce it.
+        run: dotnet restore -p:TreatWarningsAsErrors=false
+
       - name: Submit resolved dependencies
         uses: advanced-security/component-detection-dependency-submission-action@v0.1.4
         with:
