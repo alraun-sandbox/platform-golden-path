@@ -7,7 +7,9 @@
       "type": "azurerm_resource_group",
       "name": "this",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "name": "rg-riskguardian-dev-chn",
           "location": "switzerlandnorth",
@@ -25,7 +27,9 @@
       "type": "azurerm_storage_account",
       "name": "this",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "name": "striskguardiandevchn",
           "location": "switzerlandnorth",
@@ -47,7 +51,9 @@
       "type": "azurerm_storage_container",
       "name": "this",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "name": "claim-documents",
           "container_access_type": "private"
@@ -59,7 +65,9 @@
       "type": "azurerm_postgresql_flexible_server",
       "name": "this",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "name": "psql-riskguardian-dev-chn",
           "location": "switzerlandnorth",
@@ -79,7 +87,9 @@
       "type": "azurerm_key_vault",
       "name": "this",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "name": "kvriskguardiandevchn",
           "location": "switzerlandnorth",
@@ -99,18 +109,27 @@
       "type": "azurerm_private_endpoint",
       "name": "this",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "name": "pe-kvriskguardiandevchn",
           "location": "switzerlandnorth",
           "private_dns_zone_group": [
-            { "name": "default", "private_dns_zone_ids": ["/subscriptions/x/zone-vault"] }
+            {
+              "name": "default",
+              "private_dns_zone_ids": [
+                "/subscriptions/x/zone-vault"
+              ]
+            }
           ],
           "private_service_connection": [
             {
               "name": "psc-kv",
               "private_connection_resource_id": "/subscriptions/x/kv",
-              "subresource_names": ["vault"]
+              "subresource_names": [
+                "vault"
+              ]
             }
           ]
         }
@@ -121,18 +140,27 @@
       "type": "azurerm_private_endpoint",
       "name": "blob",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "name": "pe-st-blob",
           "location": "switzerlandnorth",
           "private_dns_zone_group": [
-            { "name": "default", "private_dns_zone_ids": ["/subscriptions/x/zone-blob"] }
+            {
+              "name": "default",
+              "private_dns_zone_ids": [
+                "/subscriptions/x/zone-blob"
+              ]
+            }
           ],
           "private_service_connection": [
             {
               "name": "psc-blob",
               "private_connection_resource_id": "/subscriptions/x/st",
-              "subresource_names": ["blob"]
+              "subresource_names": [
+                "blob"
+              ]
             }
           ]
         }
@@ -143,18 +171,27 @@
       "type": "azurerm_private_endpoint",
       "name": "postgres",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "name": "pe-psql",
           "location": "switzerlandnorth",
           "private_dns_zone_group": [
-            { "name": "default", "private_dns_zone_ids": ["/subscriptions/x/zone-pg"] }
+            {
+              "name": "default",
+              "private_dns_zone_ids": [
+                "/subscriptions/x/zone-pg"
+              ]
+            }
           ],
           "private_service_connection": [
             {
               "name": "psc-pg",
               "private_connection_resource_id": "/subscriptions/x/pg",
-              "subresource_names": ["postgresqlServer"]
+              "subresource_names": [
+                "postgresqlServer"
+              ]
             }
           ]
         }
@@ -165,10 +202,33 @@
       "type": "azurerm_role_assignment",
       "name": "acr_pull",
       "change": {
-        "actions": ["create"],
+        "actions": [
+          "create"
+        ],
         "after": {
           "role_definition_name": "AcrPull",
           "scope": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-riskguardian-dev-chn/providers/Microsoft.ContainerRegistry/registries/acrriskguardiandevchn"
+        }
+      }
+    },
+    {
+      "address": "module.network.azurerm_subnet_network_security_group_association.private_endpoints",
+      "module_address": "module.network",
+      "mode": "managed",
+      "type": "azurerm_subnet_network_security_group_association",
+      "name": "private_endpoints",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "subnet_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-riskguardian-dev-chn/providers/Microsoft.Network/virtualNetworks/vnet-riskguardian-dev/subnets/snet-private-endpoints",
+          "network_security_group_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-riskguardian-dev-chn/providers/Microsoft.Network/networkSecurityGroups/nsg-private-endpoints"
+        },
+        "after_unknown": {
+          "id": true
         }
       }
     }

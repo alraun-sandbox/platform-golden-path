@@ -17,6 +17,24 @@ allowed_environments := {"dev", "test", "prod"}
 
 # Tags are inherited from the resource group by convention, not by Azure. These types
 # genuinely carry their own tags and are the ones auditors ask about.
+#
+# Every entry here was checked against `terraform providers schema -json` for
+# hashicorp/azurerm. That is not pedantry. This set previously included
+# azurerm_subnet_network_security_group_association, which is an association between a
+# subnet and a network security group and has no `tags` argument at all - so the rule
+# demanded something the provider cannot express. The gate failed on
+# module.network.azurerm_subnet_network_security_group_association.private_endpoints the
+# first time it ever ran against a real plan, and no change to the Terraform could have
+# satisfied it.
+#
+# That failure mode is how policy-as-code programmes die. A team that cannot comply and
+# cannot merge does not debug the central bundle; it asks for an exemption, gets one, and
+# the exemption outlives the rule. A policy that cannot be satisfied is worse than no
+# policy, because it manufactures a reason to bypass the whole system.
+#
+# Before adding a type here, confirm it has a tags attribute in the provider schema. The
+# compliant fixture includes an untaggable association so that re-adding one fails a test
+# rather than a team's pull request.
 taggable := {
 	"azurerm_resource_group",
 	"azurerm_storage_account",
@@ -28,7 +46,6 @@ taggable := {
 	"azurerm_log_analytics_workspace",
 	"azurerm_application_insights",
 	"azurerm_virtual_network",
-	"azurerm_subnet_network_security_group_association",
 	"azurerm_network_security_group",
 }
 
