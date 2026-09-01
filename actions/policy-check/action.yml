@@ -1,12 +1,30 @@
 name: Policy check
 description: >
-  Evaluate a Terraform plan against the organisation's Rego policy bundle and render the
-  verdict as reviewable markdown. Denials fail the step; warnings do not.
+  Evaluate a file against the organisation's Rego policy bundle and render the verdict as
+  reviewable markdown. Works on a Terraform plan JSON or, with `parser`, on any format
+  Conftest understands (Dockerfile, YAML, HCL). Denials fail the step; warnings do not.
 
 inputs:
   plan-json:
-    description: Path to `terraform show -json` output.
-    required: true
+    description: Path to `terraform show -json` output. Shorthand for `files`.
+    required: false
+    default: ''
+  files:
+    description: >
+      Space-separated paths to evaluate. Takes precedence over `plan-json`. Use with `parser`
+      for non-JSON inputs.
+    required: false
+    default: ''
+  parser:
+    description: >
+      Conftest parser to force, e.g. `dockerfile`. Leave empty to let Conftest infer it from
+      the file extension, which is what a plan JSON wants.
+    required: false
+    default: ''
+  title:
+    description: Heading used for the job summary section.
+    required: false
+    default: Policy as code
   policy-path:
     description: Directory containing the Rego policies.
     required: false
@@ -40,15 +58,26 @@ runs:
 
     - name: Evaluate policies
       id: evaluate
+      env:
+        TARGETS: ${{ inputs.files != '' && inputs.files || inputs.plan-json }}
+        PARSER: ${{ inputs.parser }}
       shell: bash
       run: |
         set -uo pipefail
 
-        /tmp/conftest test \
-          --policy "${{ inputs.policy-path }}" \
-          --output json \
-          --all-namespaces \
-          "${{ inputs.plan-json }}" > result.json || true
+        if [ -z "${TARGETS// /}" ]; then
+          echo "::error::policy-check needs either files or plan-json."
+          exit 1
+        fi
+
+        args=(--policy "${{ inputs.policy-path }}" --output json --all-namespaces)
+        if [ -n "$PARSER" ]; then
+          args+=(--parser "$PARSER")
+        fi
+
+        # TARGETS is deliberately unquoted: it may name several files.
+        # shellcheck disable=SC2086
+        /tmp/conftest test "${args[@]}" $TARGETS > result.json || true
 
         fails=$(jq '[.[].failures[]?] | length' result.json)
         warns=$(jq '[.[].warnings[]?] | length' result.json)
@@ -74,7 +103,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
         {
-          echo "## Policy as code"
+          echo "## ${{ inputs.title }}"
           echo ""
           cat summary.md
         } >> "$GITHUB_STEP_SUMMARY"

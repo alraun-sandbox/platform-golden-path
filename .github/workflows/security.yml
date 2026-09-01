@@ -160,12 +160,62 @@ jobs:
           comment-summary-in-pr: on-failure
 
   # ---------------------------------------------------------------------------
+  # Container supply chain - the image the pipeline is about to build
+  # ---------------------------------------------------------------------------
+  # The Rego bundle for this lived in the golden path for a while without any
+  # workflow calling it. A policy nobody runs is documentation, and documentation
+  # does not block anything, so it runs here where every service inherits it.
+  container-policy:
+    name: container-policy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the policy bundle
+        uses: actions/checkout@v4
+        with:
+          repository: alraun-sandbox/platform-golden-path
+          ref: v1
+          path: .platform
+
+      - name: Find Dockerfiles
+        id: find
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Repository Dockerfiles only. Exclude the policy bundle we just checked
+          # out, whose fixtures are deliberately non-compliant, and any vendored or
+          # build output directories.
+          mapfile -t files < <(
+            find . -type f \( -name Dockerfile -o -name 'Dockerfile.*' \) \
+              -not -path './.platform/*' \
+              -not -path '*/node_modules/*' \
+              -not -path '*/.terraform/*' \
+              -not -path '*/obj/*' -not -path '*/bin/*' \
+              | sort
+          )
+          printf 'Found %d Dockerfile(s).\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]:-}"
+          echo "files=${files[*]:-}" >> "$GITHUB_OUTPUT"
+          echo "count=${#files[@]}" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate container policy
+        if: steps.find.outputs.count != '0'
+        uses: alraun-sandbox/platform-golden-path/actions/policy-check@v1
+        with:
+          files: ${{ steps.find.outputs.files }}
+          parser: dockerfile
+          policy-path: .platform/policy/container
+          title: Container policy
+
+  # ---------------------------------------------------------------------------
   # Evidence - so the gate result is legible to a human, not just to a bot
   # ---------------------------------------------------------------------------
   summary:
     name: security-summary
     runs-on: ubuntu-latest
-    needs: [codeql, dependency-review]
+    needs: [codeql, dependency-review, container-policy]
     if: always()
 
     steps:
@@ -179,11 +229,15 @@ jobs:
             echo "|-------|--------|"
             echo "| CodeQL (security-extended + Zurich compliance pack) | ${{ needs.codeql.result }} |"
             echo "| Dependency review (fail-on: ${{ inputs.fail-on-severity }}) | ${{ needs.dependency-review.result }} |"
+            echo "| Container policy (ZUR-SUP-006) | ${{ needs.container-policy.result }} |"
             echo ""
             echo "Secret scanning and push protection are enforced by the organisation"
             echo "security configuration, before code ever reaches this workflow."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if any gate failed
-        if: needs.codeql.result == 'failure' || needs.dependency-review.result == 'failure'
+        if: >-
+          needs.codeql.result == 'failure' ||
+          needs.dependency-review.result == 'failure' ||
+          needs.container-policy.result == 'failure'
         run: exit 1
