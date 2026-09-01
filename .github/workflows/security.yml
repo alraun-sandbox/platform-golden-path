@@ -143,6 +143,74 @@ jobs:
         with:
           category: /language:${{ inputs.language }}
 
+      # Analyze uploads the SARIF. It does not fail on what it found.
+      #
+      # Code scanning posts its own check run afterwards - named "CodeQL" - and that one does
+      # go red. But it is not the check the rulesets require, and requiring it means requiring
+      # a name owned by a product rather than by this file. So without the step below, a pull
+      # request carrying three high-severity findings had a passing security-summary, a green
+      # tick next to "security", and a merge button. All three were telling the truth about
+      # different things, and together they said the opposite of what was true.
+      #
+      # A gate that reports correctly somewhere nobody is required to look is not a gate.
+      - name: Fail on high severity alerts
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Alerts attach to the *merge* ref: CodeQL analyses the merge commit, so asking
+          # about refs/pull/N/head returns an empty list, which reads exactly like clean.
+          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+          MIN: ${{ inputs.fail-on-severity }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rank() { case "$1" in critical) echo 4;; high) echo 3;; moderate|medium) echo 2;; low) echo 1;; *) echo 0;; esac; }
+          min=$(rank "$MIN")
+
+          # Trust a zero only once an analysis exists for this ref. "Nothing found" and
+          # "nothing has run yet" are the same JSON, and only one of them is good news.
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/code-scanning/analyses?ref=${REF}&per_page=1" --jq 'length')" -eq 0 ]; then
+            echo "::error::No code scanning analysis exists for ${REF}; refusing to report this as clean."
+            exit 1
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?state=open&ref=${REF}&per_page=100" > alerts.json
+
+          jq --argjson min "$min" -r '
+            {"critical":4,"high":3,"medium":2,"low":1} as $r
+            | [ .[] | select(($r[.rule.security_severity_level // ""] // 0) >= $min) ]
+            | .[]
+            | "::error file=\(.most_recent_instance.location.path),line=\(.most_recent_instance.location.start_line)::[\(.rule.id)] \(.rule.description)"
+          ' alerts.json
+
+          count=$(jq --argjson min "$min" '
+            {"critical":4,"high":3,"medium":2,"low":1} as $r
+            | [ .[] | select(($r[.rule.security_severity_level // ""] // 0) >= $min) ] | length
+          ' alerts.json)
+
+          {
+            echo "### CodeQL — ${{ inputs.language }}"
+            echo ""
+            if [ "$count" -eq 0 ]; then
+              echo "No alerts at or above \`${MIN}\`."
+            else
+              echo "| Severity | Rule | Location |"
+              echo "|----------|------|----------|"
+              jq --argjson min "$min" -r '
+                {"critical":4,"high":3,"medium":2,"low":1} as $r
+                | .[] | select(($r[.rule.security_severity_level // ""] // 0) >= $min)
+                | "| \(.rule.security_severity_level) | `\(.rule.id)` | \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line) |"
+              ' alerts.json
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$count" -gt 0 ]; then
+            echo "::error::${count} code scanning alert(s) at or above ${MIN} on this pull request."
+            exit 1
+          fi
+          echo "No code scanning alerts at or above ${MIN}."
+
   # ---------------------------------------------------------------------------
   # Supply chain - blocks the pull request, not the release
   # ---------------------------------------------------------------------------
@@ -297,7 +365,7 @@ jobs:
             echo ""
             echo "| Check | Result |"
             echo "|-------|--------|"
-            echo "| CodeQL (security-extended + Zurich compliance pack) | ${{ needs.codeql.result }} |"
+            echo "| CodeQL (security-extended + Zurich compliance pack, fail-on: ${{ inputs.fail-on-severity }}) | ${{ needs.codeql.result }} |"
             echo "| Dependency review (fail-on: ${{ inputs.fail-on-severity }}) | ${{ needs.dependency-review.result }} |"
             echo "| Container policy (ZUR-SUP-006) | ${{ needs.container-policy.result }} |"
             echo ""
