@@ -83,7 +83,12 @@ jobs:
         id: queries
         shell: bash
         run: |
-          pack=".platform/codeql/queries/${{ inputs.language }}"
+          # The './' prefix is load-bearing. CodeQL's 'queries' value is either a local path or
+          # an external specifier 'owner/repo/path@ref', and it decides which by looking for a
+          # leading './'. Without it, '.platform/codeql/queries/java' is parsed as a repository
+          # and the run dies with "Specifier for external repository is invalid" - which does not
+          # mention paths at all, so the obvious reading is that the pack is missing.
+          pack="./.platform/codeql/queries/${{ inputs.language }}"
           if [ -d "$pack" ]; then
             echo "Using Zurich compliance pack: ${pack}"
             echo "value=security-extended,${pack}" >> "$GITHUB_OUTPUT"
