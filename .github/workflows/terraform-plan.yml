@@ -98,12 +98,20 @@ jobs:
       # Separate step on purpose. Values written to $GITHUB_ENV take effect in *subsequent*
       # steps, never in the step that writes them, so doing this inline in the plan step
       # exported nothing and Terraform failed on the missing variables anyway.
+      #
+      # The empty check is inside the script rather than in `if:` because `secrets` is not a
+      # valid context for a step-level condition. Using it there is not a runtime error - the
+      # workflow fails to parse, so every caller breaks at once, including workflow_dispatch,
+      # with HTTP 422 and no run to look at.
       - name: Export Terraform variables
-        if: ${{ secrets.TF_VARS_JSON != '' }}
         env:
           TF_VARS_JSON: ${{ secrets.TF_VARS_JSON }}
         run: |
           set -euo pipefail
+          if [ -z "${TF_VARS_JSON:-}" ]; then
+            echo "No TF_VARS_JSON supplied; nothing to export."
+            exit 0
+          fi
           count=$(python3 -c '
           import json, os
           d = json.loads(os.environ["TF_VARS_JSON"])
