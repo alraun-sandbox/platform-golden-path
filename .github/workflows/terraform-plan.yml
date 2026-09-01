@@ -160,7 +160,9 @@ jobs:
           fi
 
           set -o pipefail
-          terraform plan -input=false -lock=false "${args[@]}" -out=tfplan | tee plan.txt
+          # -no-color: plan.txt is embedded verbatim in a pull request comment, and ANSI
+          # escapes render there as literal noise like ^[[0m rather than as colour.
+          terraform plan -no-color -input=false -lock=false "${args[@]}" -out=tfplan | tee plan.txt
           terraform show -json tfplan > plan.json
 
       # ---------------------------------------------------------------------
@@ -187,27 +189,47 @@ jobs:
             try {
               plan = fs.readFileSync(`${dir}/plan.txt`, 'utf8');
             } catch { plan = '_Plan did not complete._'; }
-            if (plan.length > 55000) {
-              plan = plan.slice(0, 55000) + '\n\n... truncated, see the workflow log ...';
-            }
-            const policy = process.env.POLICY_RESULT || '_Policy check did not run._';
+            let policy = process.env.POLICY_RESULT || '_Policy check did not run._';
             const marker = '<!-- riskguardian-terraform-plan -->';
-            const body = [
+
+            // GitHub rejects a comment body over 65536 characters with HTTP 422, which
+            // would surface as a red check with no explanation of what went wrong -- the
+            // worst possible outcome for a guardrail. Both halves are unbounded: the plan
+            // grows with the environment, and the verdict grows with the number of
+            // violations. So budget explicitly, and always keep the verdict: knowing which
+            // rules failed matters far more than reading the plan in the comment, and the
+            // full text is on the artifact either way.
+            const LIMIT = 60000;
+            const NOTE = '\n\n... truncated, see the `tfplan` artifact on the run ...';
+            const build = (p, v) => [
               marker,
               `### Terraform plan · \`${{ inputs.environment }}\``,
               '',
               '#### Policy verdict',
               '',
-              policy,
+              v,
               '',
               '<details><summary>Plan output</summary>',
               '',
               '```terraform',
-              plan,
+              p,
               '```',
               '',
               '</details>',
             ].join('\n');
+
+            const overhead = build('', policy).length;
+            let budget = LIMIT - overhead - NOTE.length;
+            if (budget < 0) {
+              // Pathological: the verdict alone overflows. Trim it rather than fail.
+              policy = policy.slice(0, LIMIT - build('', '').length - NOTE.length) + NOTE;
+              budget = 0;
+            }
+            if (plan.length > budget) {
+              plan = budget > 0 ? plan.slice(0, budget) + NOTE : NOTE.trim();
+            }
+            const body = build(plan, policy);
+            core.info(`Comment body is ${body.length} characters (limit 65536).`);
 
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
