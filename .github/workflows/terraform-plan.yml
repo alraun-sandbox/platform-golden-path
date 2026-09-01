@@ -95,6 +95,29 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: terraform validate
 
+      # Separate step on purpose. Values written to $GITHUB_ENV take effect in *subsequent*
+      # steps, never in the step that writes them, so doing this inline in the plan step
+      # exported nothing and Terraform failed on the missing variables anyway.
+      - name: Export Terraform variables
+        if: ${{ secrets.TF_VARS_JSON != '' }}
+        env:
+          TF_VARS_JSON: ${{ secrets.TF_VARS_JSON }}
+        run: |
+          set -euo pipefail
+          count=$(python3 -c '
+          import json, os
+          d = json.loads(os.environ["TF_VARS_JSON"])
+          with open(os.environ["GITHUB_ENV"], "a") as fh:
+              for k, v in d.items():
+                  # Mask each value individually. Only the JSON blob is a registered secret;
+                  # the strings inside it are not, so an unmasked one could reach the log
+                  # through a Terraform error message quoting the value.
+                  print(f"::add-mask::{v}")
+                  fh.write(f"TF_VAR_{k}<<TFVAREOF\n{v}\nTFVAREOF\n")
+          print(len(d))
+          ' | tail -n 1)
+          echo "Exported ${count} Terraform variable(s) from TF_VARS_JSON."
+
       - name: Plan
         id: plan
         working-directory: ${{ inputs.working-directory }}
@@ -103,24 +126,8 @@ jobs:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          TF_VARS_JSON: ${{ secrets.TF_VARS_JSON }}
         run: |
           set -euo pipefail
-
-          # Export TF_VAR_<name> for each entry, without ever echoing a value. Written to
-          # $GITHUB_ENV rather than evaluated inline so that no value can end up in the
-          # command that appears in the log.
-          if [ -n "${TF_VARS_JSON:-}" ]; then
-            count=$(python3 -c '
-          import json, os, sys
-          d = json.loads(os.environ["TF_VARS_JSON"])
-          with open(os.environ["GITHUB_ENV"], "a") as fh:
-              for k, v in d.items():
-                  fh.write(f"TF_VAR_{k}<<TFVAREOF\n{v}\nTFVAREOF\n")
-          print(len(d))
-          ')
-            echo "Exported ${count} Terraform variable(s) from TF_VARS_JSON."
-          fi
 
           # Some layouts keep one directory per environment and no tfvars file at all. Pass
           # -var-file only when there is one, rather than failing on a file the repository
