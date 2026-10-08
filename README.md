@@ -82,6 +82,7 @@ the service team's to configure.
 | `terraform-plan.yml` | `terraform-plan` | fmt, validate, plan, Conftest, plan-and-verdict as a PR comment |
 | `deploy-container-app.yml` | — | Dockerfile policy, build, image scan, OIDC deploy, health verification |
 | `self-test.yml` | — | This repository proving its own policies still work |
+| `required.yml` | `required` | No-op confirmation workflow for ruleset testing |
 
 The check names matter: the organisation rulesets require `build` and `security` on every
 `tier=critical` repository. A team cannot satisfy the ruleset without calling these workflows,
@@ -190,4 +191,3 @@ Changes here affect every team. CODEOWNERS requires review from
 additionally require **@alraun-sandbox/security-guild**.
 
 Add a fixture with every policy change. If it is not in `self-test.yml`, it is not enforced.
-
