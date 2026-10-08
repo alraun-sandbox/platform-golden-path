@@ -1,0 +1,15 @@
+name: Reusable · NOP
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  nop:
+    name: nop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm execution
+        run: echo "NOP workflow executed successfully."

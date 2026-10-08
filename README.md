@@ -81,6 +81,7 @@ the service team's to configure.
 | `security.yml` | `security` | CodeQL (stock + Zurich compliance pack), dependency review, licence policy |
 | `terraform-plan.yml` | `terraform-plan` | fmt, validate, plan, Conftest, plan-and-verdict as a PR comment |
 | `deploy-container-app.yml` | — | Dockerfile policy, build, image scan, OIDC deploy, health verification |
+| `nop.yml` | `nop` | Confirm workflow execution without performing work |
 | `self-test.yml` | — | This repository proving its own policies still work |
 
 The check names matter: the organisation rulesets require `build` and `security` on every
@@ -190,4 +191,3 @@ Changes here affect every team. CODEOWNERS requires review from
 additionally require **@alraun-sandbox/security-guild**.
 
 Add a fixture with every policy change. If it is not in `self-test.yml`, it is not enforced.
-
