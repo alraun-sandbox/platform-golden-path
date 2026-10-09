@@ -17,4 +17,10 @@ jobs:
       - name: Confirm execution
         env:
           DUMMY_VAR: ${{ vars.DUMMY_VAR }}
-        run: echo "NOP workflow executed successfully. DUMMY_VAR=${DUMMY_VAR}"
+        run: |
+          echo "NOP workflow executed successfully. DUMMY_VAR=${DUMMY_VAR}"
+          if [[ "${DUMMY_VAR}" == *sherlock* ]]; then
+            echo "DUMMY_VAR contains sherlock."
+          else
+            echo "DUMMY_VAR does not contain sherlock."
+          fi
