@@ -15,4 +15,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Confirm execution
-        run: echo "NOP workflow executed successfully."
+        run: echo "NOP workflow executed successfully. DUMMY_VAR=${DUMMY_VAR}"
