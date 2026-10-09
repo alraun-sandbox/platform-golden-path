@@ -14,13 +14,14 @@ jobs:
     name: nop
     runs-on: ubuntu-latest
     steps:
-      - name: Confirm execution
+      - name: Handle sherlock DUMMY_VAR
+        if: ${{ contains(vars.DUMMY_VAR, 'sherlock') }}
         env:
           DUMMY_VAR: ${{ vars.DUMMY_VAR }}
-        run: |
-          echo "NOP workflow executed successfully. DUMMY_VAR=${DUMMY_VAR}"
-          if [[ "${DUMMY_VAR}" == *sherlock* ]]; then
-            echo "DUMMY_VAR contains sherlock."
-          else
-            echo "DUMMY_VAR does not contain sherlock."
-          fi
+        run: echo "NOP workflow executed successfully. DUMMY_VAR contains sherlock: ${DUMMY_VAR}"
+
+      - name: Handle non-sherlock DUMMY_VAR
+        if: ${{ !contains(vars.DUMMY_VAR, 'sherlock') }}
+        env:
+          DUMMY_VAR: ${{ vars.DUMMY_VAR }}
+        run: echo "NOP workflow executed successfully. DUMMY_VAR does not contain sherlock: ${DUMMY_VAR}"
